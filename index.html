@@ -210,7 +210,7 @@
                 } else {
                     // Inside label at MID_R
                     const [lx, ly] = toXY(MID_R, mid);
-                    const fs = seg.type === 'pipeline' ? 28 : seg.type === 'code' ? 19 : 26;
+                    const fs = seg.type === 'pipeline' ? 28 : 26;
                     out += `<text x="${lx}" y="${ly}" text-anchor="middle" dominant-baseline="middle"
         font-size="${fs}" font-weight="600" font-family="Inter,sans-serif"
         fill="${col.text}" letter-spacing="-0.4">${seg.name}</text>`;
