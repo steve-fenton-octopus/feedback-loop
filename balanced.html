@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>DevOps Loop</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        *,
+        *::before,
+        *::after {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
+            background: #e5e7eb;
+            padding: 40px;
+            font-family: "Inter", sans-serif;
+        }
+
+        #slide {
+            position: relative;
+            padding: 72px;
+            font-family: "Inter", sans-serif;
+            background: transparent;
+            border-radius: 12px;
+            transition: background 0.25s;
+        }
+
+        #slide.has-bg {
+            background: #ffffff;
+        }
+
+        #slide.dark.has-bg {
+            background: #111a23;
+        }
+
+        #controls {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            display: flex;
+            gap: 12px;
+            z-index: 9999;
+        }
+
+        #controls button {
+            padding: 11px 22px;
+            border: none;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            font-family: inherit;
+            transition: all 0.2s;
+        }
+
+        #export-btn {
+            background: #1a77ca;
+            color: #fff;
+        }
+
+        #export-btn:hover {
+            background: #155ea0;
+        }
+
+        #svg-btn {
+            background: #895ed3;
+            color: #fff;
+        }
+
+        #svg-btn:hover {
+            background: #7043b7;
+        }
+
+        #theme-toggle,
+        #bg-toggle {
+            background: #f5f6f8;
+            color: #282f38;
+            border: 1px solid #dee1e6;
+        }
+
+        #theme-toggle:hover,
+        #bg-toggle:hover {
+            background: #dee1e6;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="slide">
+        <svg id="diagram" viewBox="0 0 1000 1000" width="860" height="860"></svg>
+    </div>
+
+    <div id="controls">
+        <button id="bg-toggle" onclick="toggleBg()">🎨 Add Background</button>
+        <button id="theme-toggle" onclick="toggleTheme()">🌙 Dark</button>
+        <button id="svg-btn" onclick="exportToSVG()">🔷 Export to SVG</button>
+        <button id="export-btn" onclick="exportToPNG()">📥 Export to PNG</button>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script>
+        // ── Geometry constants ────────────────────────────────────────────────────────
+        const CX = 500, CY = 500;
+        const OUTER = 318, INNER = 188;
+        const MID_R = (OUTER + INNER) / 2;   // 253 — label radius for inside segments
+        const GAP = 2.2;                   // degrees gap between segments
+
+        // Segments (clockwise from top). Total must equal 360.
+        const segmentCount = 7;
+        const sa = 360 / segmentCount;
+        const SEGMENTS = [
+            { name: 'Idea', s: 0 * sa, e: 1 * sa, type: 'normal' },
+            { name: 'Refine', s: 1 * sa, e: 2 * sa, type: 'normal' },
+            { name: 'Code', s: 2 * sa, e: 3 * sa, type: 'code' },
+            { name: 'Build', s: 3 * sa, e: 4 * sa, type: 'pipeline' },
+            { name: 'Test', s: 4 * sa, e: 5 * sa, type: 'pipeline' },
+            { name: 'Deploy', s: 5 * sa, e: 6 * sa, type: 'pipeline' },
+            { name: 'Feedback', s: 6 * sa, e: 7 * sa, type: 'feedback' },
+        ];
+
+        // ── Themes ────────────────────────────────────────────────────────────────────
+        const THEMES = {
+            light: {
+                normal: { fill: '#cde4f7', text: '#093051' },
+                code: { fill: '#eef0f3', text: '#515d70' },
+                pipeline: { fill: '#1a77ca', text: '#ffffff' },
+                feedback: { fill: '#b8e7d3', text: '#00362a' },
+                squeezeColor: '#515d70',
+                flowColor: '#68778d',
+                pipelineGlow: '#1a77ca',
+            },
+            dark: {
+                normal: { fill: '#1f303f', text: '#a9bbcb' },
+                code: { fill: '#243344', text: '#7c98b4' },
+                pipeline: { fill: '#155ea0', text: '#f2f8fd' },
+                feedback: { fill: '#00362a', text: '#5ecd9e' },
+                squeezeColor: '#7c98b4',
+                flowColor: '#7c98b4',
+                pipelineGlow: '#449be1',
+            },
+        };
+
+        // ── Geometry helpers ──────────────────────────────────────────────────────────
+        function toXY(r, degFromTop) {
+            const rad = (degFromTop - 90) * Math.PI / 180;
+            return [CX + r * Math.cos(rad), CY + r * Math.sin(rad)];
+        }
+
+        function arcPath(sDeg, eDeg, outerR, innerR) {
+            const s = sDeg + GAP / 2, e = eDeg - GAP / 2;
+            const [x1, y1] = toXY(outerR, s);
+            const [x2, y2] = toXY(outerR, e);
+            const [x3, y3] = toXY(innerR, e);
+            const [x4, y4] = toXY(innerR, s);
+            const large = (e - s) > 180 ? 1 : 0;
+            return `M${x1},${y1} A${outerR},${outerR} 0 ${large} 1 ${x2},${y2}`
+                + ` L${x3},${y3} A${innerR},${innerR} 0 ${large} 0 ${x4},${y4} Z`;
+        }
+
+        function midAngle(seg) { return (seg.s + seg.e) / 2; }
+
+        // ── Render ────────────────────────────────────────────────────────────────────
+        let isDark = false;
+
+        function render() {
+            const t = isDark ? THEMES.dark : THEMES.light;
+            const svg = document.getElementById('diagram');
+            let out = '';
+
+            // ── Defs ──
+            out += `<defs>
+    <!-- flow direction arrowhead -->
+    <marker id="flow-arr" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <polygon points="0,0 9,4.5 0,9" fill="${t.flowColor}" opacity="0.7"/>
+    </marker>
+    <!-- pipeline glow -->
+    <filter id="pipe-glow" x="-18%" y="-18%" width="136%" height="136%">
+      <feDropShadow dx="0" dy="0" stdDeviation="9"
+        flood-color="${t.pipelineGlow}" flood-opacity="0.42"/>
+    </filter>
+  </defs>`;
+
+            // ── Segment fills ──
+            SEGMENTS.forEach(seg => {
+                const col = t[seg.type];
+                const glowAttr = seg.type === 'pipeline' ? ' filter="url(#pipe-glow)"' : '';
+                out += `<path d="${arcPath(seg.s, seg.e, OUTER, INNER)}" fill="${col.fill}"${glowAttr}/>`;
+            });
+
+            // ── Labels ──
+            SEGMENTS.forEach(seg => {
+                const col = t[seg.type];
+                const mid = midAngle(seg);
+
+                if (false) {
+                    // (outside label removed)
+                } else {
+                    // Inside label at MID_R
+                    const [lx, ly] = toXY(MID_R, mid);
+                    const fs = seg.type === 'pipeline' ? 28 : 26;
+                    out += `<text x="${lx}" y="${ly}" text-anchor="middle" dominant-baseline="middle"
+        font-size="${fs}" font-weight="600" font-family="Inter,sans-serif"
+        fill="${col.text}" letter-spacing="-0.4">${seg.name}</text>`;
+                }
+            });
+
+            // ── Flow direction arrow (shows the loop is clockwise) ──
+            // Short clockwise arc on the inner ring, placed in the "idea" segment area (≈22°).
+            const FLOW_R = INNER - 26;
+            const [fa1x, fa1y] = toXY(FLOW_R, 14);
+            const [fa2x, fa2y] = toXY(FLOW_R, 26);
+            out += `<path d="M${fa1x},${fa1y} A${FLOW_R},${FLOW_R} 0 0 1 ${fa2x},${fa2y}"
+    fill="none" stroke="${t.flowColor}" stroke-width="2" opacity="0.6"
+    marker-end="url(#flow-arr)" stroke-linecap="round"/>`;
+
+            svg.innerHTML = out;
+        }
+
+        render();
+
+        // ── Controls ──────────────────────────────────────────────────────────────────
+        function toggleTheme() {
+            isDark = !isDark;
+            document.getElementById('slide').classList.toggle('dark', isDark);
+            document.body.style.background = isDark ? '#0a111a' : '#e5e7eb';
+            document.getElementById('theme-toggle').textContent = isDark ? '☀️ Light' : '🌙 Dark';
+            render();
+        }
+
+        function toggleBg() {
+            const slide = document.getElementById('slide');
+            slide.classList.toggle('has-bg');
+            document.getElementById('bg-toggle').textContent =
+                slide.classList.contains('has-bg') ? '🎨 Transparent' : '🎨 Add Background';
+        }
+
+        // ── Export PNG ────────────────────────────────────────────────────────────────
+        async function exportToPNG() {
+            const btn = document.getElementById('export-btn');
+            btn.textContent = '⏳ Exporting…'; btn.disabled = true;
+            try {
+                const slide = document.getElementById('slide');
+                const canvas = await html2canvas(slide, {
+                    scale: 2, useCORS: true, backgroundColor: null, logging: false
+                });
+                const link = document.createElement('a');
+                link.download = 'devops-loop-balanced.png';
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+            } finally {
+                btn.textContent = '📥 Export to PNG'; btn.disabled = false;
+            }
+        }
+
+        // ── Export SVG ────────────────────────────────────────────────────────────────
+        function exportToSVG() {
+            const btn = document.getElementById('svg-btn');
+            const orig = btn.textContent;
+            btn.textContent = '⏳ Exporting…'; btn.disabled = true;
+            try {
+                const svgEl = document.getElementById('diagram');
+                const css = Array.from(document.querySelectorAll('style'))
+                    .map(s => s.textContent).join('\n');
+                const clone = svgEl.cloneNode(true);
+                clone.removeAttribute('id');
+                const svgStr = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 1000 1000" width="1000" height="1000">
+  <defs><style><![CDATA[${css}]]></style></defs>
+  ${clone.innerHTML}
+</svg>`;
+                const blob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
+                const link = document.createElement('a');
+                link.download = 'devops-loop.svg';
+                link.href = URL.createObjectURL(blob);
+                link.click();
+                URL.revokeObjectURL(link.href);
+            } finally {
+                btn.textContent = orig; btn.disabled = false;
+            }
+        }
+    </script>
+</body>
+
+</html>
